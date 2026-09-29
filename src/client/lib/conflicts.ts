@@ -1,4 +1,5 @@
 import { ApiError } from "../api";
+import { toPersianDigits } from "./format";
 
 /** One thing already in the way of a booking, as the API reports it. */
 export type Conflict = {
@@ -19,12 +20,14 @@ export function conflictsFrom(err: unknown): Conflict[] | null {
   return (err.body as { conflicts?: Conflict[] }).conflicts ?? [];
 }
 
-/** `"10:00 - 11:00 booked for Jamie Rivera"`, or the reason for a blocked slot. */
+/** `"۱۰:۰۰ تا ۱۱:۰۰ رزرو شده برای نازنین احمدی"`, or the reason for a blocked slot. */
 export function describeConflict(c: Conflict): string {
-  return `${c.start_time} - ${c.end_time} ${c.kind === "blocked" ? c.label : `booked for ${c.label}`}`;
+  const start = toPersianDigits(c.start_time);
+  const end = toPersianDigits(c.end_time);
+  return `${start} تا ${end} (${c.kind === "blocked" ? `مسدود: ${c.label || "عدم حضور"}` : `رزرو شده برای ${c.label}`})`;
 }
 
 /** One sentence, for the places with no room to list the clashes. */
 export function conflictSentence(who: string, conflicts: Conflict[]): string {
-  return `${who || "That staff member"} is not free then: ${conflicts.map(describeConflict).join(", ")}.`;
+  return `${who || "این پرسنل"} در این ساعت آزاد نیست: ${conflicts.map(describeConflict).join("، ")}.`;
 }

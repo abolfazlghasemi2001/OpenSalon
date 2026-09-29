@@ -13,6 +13,8 @@ import { ClientDetail } from "./components/client-detail";
 import { StaffList } from "./components/staff-list";
 import { ServiceList } from "./components/service-list";
 import { ProductList } from "./components/product-list";
+import { ReportsView } from "./components/reports-view";
+import { OnlineBooking } from "./components/online-booking";
 import { ErrorBanner } from "./components/error-banner";
 
 export function App() {
@@ -49,17 +51,21 @@ export function App() {
       case "staff": return <StaffList />;
       case "services": return <ServiceList />;
       case "products": return <ProductList />;
+      case "reports": return <ReportsView />;
+      case "booking": return <OnlineBooking />;
       default: return <Dashboard />;
     }
   };
 
   return (
     <AppContext.Provider value={appState}>
-      <div className="flex h-dvh flex-col overflow-hidden md:flex-row">
+      <div className="flex h-dvh flex-col overflow-hidden md:flex-row" dir="rtl">
         <Sidebar currentView={view} />
         <main className="min-h-0 min-w-0 flex-1 overflow-auto bg-background">
           {appState.loading ? (
-            <div className="flex h-full items-center justify-center text-muted-foreground">Loading...</div>
+            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              در حال بارگذاری اطلاعات سالن...
+            </div>
           ) : (
             renderMain()
           )}

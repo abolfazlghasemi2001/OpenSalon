@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS staff (
   phone TEXT DEFAULT '',
   title TEXT DEFAULT '',
   color TEXT NOT NULL DEFAULT '#7c3aed',
+  commission_rate REAL NOT NULL DEFAULT 40,
   active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT DEFAULT (datetime('now'))
 );
@@ -45,6 +46,10 @@ CREATE TABLE IF NOT EXISTS appointments (
   start_time TEXT NOT NULL DEFAULT '09:00',
   end_time TEXT NOT NULL DEFAULT '10:00',
   total_price REAL NOT NULL DEFAULT 0,
+  discount_amount REAL NOT NULL DEFAULT 0,
+  deposit_amount REAL NOT NULL DEFAULT 0,
+  payment_status TEXT NOT NULL DEFAULT 'unpaid',
+  payment_method TEXT DEFAULT '',
   notes TEXT DEFAULT '',
   is_recurring INTEGER NOT NULL DEFAULT 0,
   recurrence_interval TEXT DEFAULT '',
@@ -100,9 +105,6 @@ CREATE TABLE IF NOT EXISTS _meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
--- Seed rows (the _meta counter rows and the example staff / services /
--- clients / products) moved into the app: see src/server/seed.ts. Clawnify
--- applies this file as DDL only, so any INSERT here fails the whole deploy.
 
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_appointments_client ON appointments(client_id);

@@ -26,7 +26,7 @@ export function CreateProduct({ onClose, product }: { onClose: () => void; produ
   const isEditing = product !== undefined;
 
   const handleSubmit = async () => {
-    if (!name.trim()) { setError("Name is required"); return; }
+    if (!name.trim()) { setError("وارد کردن نام محصول الزامی است"); return; }
     setSaving(true);
     try {
       const data = {
@@ -50,51 +50,53 @@ export function CreateProduct({ onClose, product }: { onClose: () => void; produ
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>{isEditing ? "Edit Product" : "Add Product"}</DialogTitle>
+          <DialogTitle>{isEditing ? "ویرایش محصول انبار" : "افزودن محصول جدید به انبار"}</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1.5">
-            <Label htmlFor="product-name">Name *</Label>
-            <Input id="product-name" value={name} onChange={(e) => setName((e.target as HTMLInputElement).value)} placeholder="Product name" />
+            <Label htmlFor="product-name">نام محصول *</Label>
+            <Input id="product-name" value={name} onChange={(e) => setName((e.target as HTMLInputElement).value)} placeholder="مثلاً شامپو بدون سولفات کراتینه" />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="product-brand">Brand</Label>
-              <Input id="product-brand" value={brand} onChange={(e) => setBrand((e.target as HTMLInputElement).value)} />
+              <Label htmlFor="product-brand">برند</Label>
+              <Input id="product-brand" value={brand} onChange={(e) => setBrand((e.target as HTMLInputElement).value)} placeholder="مثلاً ProCare" />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="product-category">Category</Label>
-              <Input id="product-category" value={category} onChange={(e) => setCategory((e.target as HTMLInputElement).value)} placeholder="e.g. Hair Care" />
+              <Label htmlFor="product-category">دسته‌بندی</Label>
+              <Input id="product-category" value={category} onChange={(e) => setCategory((e.target as HTMLInputElement).value)} placeholder="مثلاً مراقبت مو" />
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="product-sku">SKU</Label>
-            <Input id="product-sku" value={sku} onChange={(e) => setSku((e.target as HTMLInputElement).value)} placeholder="Optional" />
+            <Label htmlFor="product-sku">کد کالا (SKU)</Label>
+            <Input id="product-sku" value={sku} onChange={(e) => setSku((e.target as HTMLInputElement).value)} placeholder="اختیاری (مثلاً SH-101)" />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="product-price">Sell Price ($)</Label>
-              <Input id="product-price" type="number" min="0" step="0.01" value={price} onChange={(e) => setPrice((e.target as HTMLInputElement).value)} />
+              <Label htmlFor="product-price">قیمت فروش (تومان)</Label>
+              <Input id="product-price" type="number" min="0" step="10000" value={price} onChange={(e) => setPrice((e.target as HTMLInputElement).value)} />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="product-cost">Cost ($)</Label>
-              <Input id="product-cost" type="number" min="0" step="0.01" value={cost} onChange={(e) => setCost((e.target as HTMLInputElement).value)} />
+              <Label htmlFor="product-cost">قیمت خرید (تومان)</Label>
+              <Input id="product-cost" type="number" min="0" step="10000" value={cost} onChange={(e) => setCost((e.target as HTMLInputElement).value)} />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="product-stock">Stock</Label>
+              <Label htmlFor="product-stock">تعداد موجودی فعلی</Label>
               <Input id="product-stock" type="number" min="0" step="1" value={stock} onChange={(e) => setStock((e.target as HTMLInputElement).value)} />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="product-low-stock-alert">Low Stock Alert</Label>
+              <Label htmlFor="product-low-stock-alert">حد هشدار اتمام موجودی</Label>
               <Input id="product-low-stock-alert" type="number" min="0" step="1" value={lowStockAlert} onChange={(e) => setLowStockAlert((e.target as HTMLInputElement).value)} />
             </div>
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button disabled={saving} onClick={handleSubmit}>{saving ? "Saving..." : isEditing ? "Save Changes" : "Add Product"}</Button>
+          <Button variant="outline" onClick={onClose}>انصراف</Button>
+          <Button disabled={saving} onClick={handleSubmit}>
+            {saving ? "در حال ذخیره..." : isEditing ? "ذخیره تغییرات" : "افزودن محصول"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

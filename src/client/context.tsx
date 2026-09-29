@@ -23,14 +23,19 @@ export interface AppContextValue {
     staff_id?: number | null;
     scheduled_date: string;
     start_time?: string;
+    discount_amount?: number;
+    deposit_amount?: number;
+    payment_status?: string;
+    payment_method?: string;
     notes?: string;
     is_recurring?: number;
     recurrence_interval?: string;
     service_ids?: number[];
     allow_conflict?: boolean;
-  }) => Promise<void>;
+  }) => Promise<Appointment | void>;
   updateAppointment: (id: number, data: Partial<Appointment> & { allow_conflict?: boolean }) => Promise<void>;
   deleteAppointment: (id: number) => Promise<void>;
+  seedDemoAppointments: () => Promise<number>;
 
   // Appointment detail
   selectedAppointment: Appointment | null;
@@ -52,7 +57,7 @@ export interface AppContextValue {
   setClientsPage: (page: number) => void;
   clientsSearch: string;
   setClientsSearch: (s: string) => void;
-  addClient: (data: Partial<Client>) => Promise<void>;
+  addClient: (data: Partial<Client>) => Promise<Client | void>;
   updateClient: (id: number, data: Partial<Client>) => Promise<void>;
   deleteClient: (id: number) => Promise<void>;
   selectedClient: Client | null;

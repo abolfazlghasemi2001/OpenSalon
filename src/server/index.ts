@@ -8,7 +8,7 @@ type Env = { Bindings: { DB: D1Database } };
 const app = createApp<Env>({
   title: "OpenSalon",
   version: "1.0.0",
-  description: "Appointment scheduling and business management for salons, spas, and other appointment-based businesses.",
+  description: "سامانه جامع نوبت‌دهی و مدیریت سالن‌های زیبایی و مراکز خدماتی (OpenSalon Persian Edition)",
 });
 
 // Seed sample data + the appointment counter rows on the first request an
@@ -52,6 +52,7 @@ const StaffSchema = z.object({
   phone: z.string(),
   title: z.string(),
   color: z.string(),
+  commission_rate: z.number().optional(),
   active: z.number().int(),
   appointment_count: z.number().int().optional(),
   created_at: z.string(),
@@ -95,6 +96,10 @@ const AppointmentSchema = z.object({
   start_time: z.string(),
   end_time: z.string(),
   total_price: z.number(),
+  discount_amount: z.number().optional(),
+  deposit_amount: z.number().optional(),
+  payment_status: z.string().optional(),
+  payment_method: z.string().optional(),
   notes: z.string(),
   is_recurring: z.number().int(),
   recurrence_interval: z.string(),
@@ -143,8 +148,6 @@ async function nextIdentifier(): Promise<string> {
   const prefix = await get<{ value: string }>("SELECT value FROM _meta WHERE key = 'appointment_prefix'");
   const counter = await get<{ value: string }>("SELECT value FROM _meta WHERE key = 'appointment_counter'");
   const next = parseInt(counter?.value || "0", 10) + 1;
-  // Upsert, not UPDATE: a plain UPDATE matches zero rows if the counter row is
-  // missing, which would hand out the same identifier forever.
   await run(
     "INSERT INTO _meta (key, value) VALUES ('appointment_counter', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
     [String(next)],
@@ -160,14 +163,6 @@ function addMinutes(time: string, minutes: number): string {
   return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
 }
 
-/**
- * What already occupies `staffId` on `date`: their other appointments, plus any
- * time blocked off for lunch, holiday and the like.
- *
- * Cancelled appointments free the chair, and are the one status left out. That
- * matches what `/api/calendar` draws, so the rule an owner sees is simply
- * "if it is on the calendar, it is taken".
- */
 async function busyFor(staffId: number, date: string, excludeAppointmentId?: number): Promise<Busy[]> {
   const appts = await query<{ start_time: string; end_time: string; client_name: string | null }>(
     `SELECT a.start_time, a.end_time, cl.name as client_name
@@ -193,7 +188,6 @@ async function busyFor(staffId: number, date: string, excludeAppointmentId?: num
   ];
 }
 
-/** The staff member's name, for the conflict message. */
 async function staffName(staffId: number): Promise<string> {
   const s = await get<{ name: string }>("SELECT name FROM staff WHERE id = ?", [staffId]);
   return s?.name || "";
@@ -230,10 +224,10 @@ app.openapi(getStats, async (c) => {
   const staff = await get<{ count: number }>("SELECT COUNT(*) as count FROM staff WHERE active = 1");
   const services = await get<{ count: number }>("SELECT COUNT(*) as count FROM services WHERE active = 1");
   const products = await get<{ count: number }>("SELECT COUNT(*) as count FROM products");
-  const todayAppointments = await get<{ count: number }>("SELECT COUNT(*) as count FROM appointments WHERE scheduled_date = ?", [today]);
+  const todayAppointments = await get<{ count: number }>("SELECT COUNT(*) as count FROM appointments WHERE scheduled_date = ? AND status != 'cancelled'", [today]);
   const upcomingAppointments = await get<{ count: number }>("SELECT COUNT(*) as count FROM appointments WHERE status IN ('booked', 'confirmed') AND scheduled_date >= ?", [today]);
   const completedAppointments = await get<{ count: number }>("SELECT COUNT(*) as count FROM appointments WHERE status = 'completed'");
-  const revenue = await get<{ total: number }>("SELECT COALESCE(SUM(total_price), 0) as total FROM appointments WHERE status = 'completed'");
+  const revenue = await get<{ total: number }>("SELECT COALESCE(SUM(MAX(total_price - COALESCE(discount_amount, 0), 0)), 0) as total FROM appointments WHERE status = 'completed'");
   const lowStock = await get<{ count: number }>("SELECT COUNT(*) as count FROM products WHERE stock <= low_stock_alert");
   return c.json({
     appointments: appointments?.count || 0,
@@ -247,6 +241,324 @@ app.openapi(getStats, async (c) => {
     revenue: revenue?.total || 0,
     low_stock_products: lowStock?.count || 0,
   }, 200);
+});
+
+// ── Financial & Commission Reports ────────────────────────────────
+
+const getReports = createRoute({
+  method: "get",
+  path: "/api/reports",
+  request: {
+    query: z.object({
+      start: z.string().optional(),
+      end: z.string().optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Financial, commission, and operational reports",
+      content: { "application/json": { schema: z.object({
+        summary: z.object({
+          total_appointments: z.number().int(),
+          completed_appointments: z.number().int(),
+          cancelled_appointments: z.number().int(),
+          gross_revenue: z.number(),
+          net_revenue: z.number(),
+          total_discounts: z.number(),
+          total_collected: z.number(),
+          total_unpaid: z.number(),
+          total_commissions: z.number(),
+          salon_net_profit: z.number(),
+          inventory_value: z.number(),
+          inventory_cost: z.number(),
+        }),
+        staff_performance: z.array(z.object({
+          id: z.number().int(),
+          name: z.string(),
+          title: z.string(),
+          color: z.string(),
+          commission_rate: z.number(),
+          total_appointments: z.number().int(),
+          completed_appointments: z.number().int(),
+          total_revenue: z.number(),
+          commission_amount: z.number(),
+          salon_share: z.number(),
+        })),
+        top_services: z.array(z.object({
+          id: z.number().int(),
+          name: z.string(),
+          category: z.string(),
+          color: z.string(),
+          booking_count: z.number().int(),
+          revenue: z.number(),
+        })),
+        payment_breakdown: z.array(z.object({
+          method: z.string(),
+          count: z.number().int(),
+          amount: z.number(),
+        })),
+      }) } },
+    },
+  },
+});
+
+app.openapi(getReports, async (c) => {
+  const { start, end } = c.req.valid("query");
+  let dateFilter = "WHERE 1=1";
+  const dateParams: unknown[] = [];
+  if (start) { dateFilter += " AND a.scheduled_date >= ?"; dateParams.push(start); }
+  if (end) { dateFilter += " AND a.scheduled_date <= ?"; dateParams.push(end); }
+
+  const appts = await query<{
+    id: number;
+    staff_id: number | null;
+    status: string;
+    total_price: number;
+    discount_amount: number;
+    deposit_amount: number;
+    payment_status: string;
+    payment_method: string;
+  }>(
+    `SELECT a.id, a.staff_id, a.status, a.total_price,
+            COALESCE(a.discount_amount, 0) as discount_amount,
+            COALESCE(a.deposit_amount, 0) as deposit_amount,
+            COALESCE(a.payment_status, 'unpaid') as payment_status,
+            COALESCE(a.payment_method, '') as payment_method
+     FROM appointments a ${dateFilter}`,
+    dateParams,
+  );
+
+  const staffRows = await query<{
+    id: number;
+    name: string;
+    title: string;
+    color: string;
+    commission_rate: number;
+  }>("SELECT id, name, title, color, COALESCE(commission_rate, 40) as commission_rate FROM staff ORDER BY name ASC");
+
+  let totalAppointments = appts.length;
+  let completedAppointments = 0;
+  let cancelledAppointments = 0;
+  let grossRevenue = 0;
+  let netRevenue = 0;
+  let totalDiscounts = 0;
+  let totalCollected = 0;
+  let totalUnpaid = 0;
+
+  const methodMap = new Map<string, { count: number; amount: number }>();
+
+  for (const a of appts) {
+    const net = Math.max(0, (a.total_price || 0) - (a.discount_amount || 0));
+    if (a.status === "cancelled" || a.status === "no_show") {
+      cancelledAppointments++;
+      continue;
+    }
+    totalDiscounts += a.discount_amount || 0;
+    if (a.status === "completed") {
+      completedAppointments++;
+      grossRevenue += a.total_price || 0;
+      netRevenue += net;
+    }
+    // Payment collection calculation
+    let collected = 0;
+    if (a.payment_status === "paid" || (a.status === "completed" && a.payment_status !== "unpaid" && a.payment_status !== "deposit")) {
+      collected = net;
+    } else if (a.payment_status === "deposit") {
+      collected = Math.min(net, a.deposit_amount || 0);
+    }
+    totalCollected += collected;
+    totalUnpaid += Math.max(0, net - collected);
+
+    if (collected > 0) {
+      const mKey = a.payment_method || "card";
+      const cur = methodMap.get(mKey) || { count: 0, amount: 0 };
+      cur.count += 1;
+      cur.amount += collected;
+      methodMap.set(mKey, cur);
+    }
+  }
+
+  let totalCommissions = 0;
+  const staffPerformance = staffRows.map((s) => {
+    const memberAppts = appts.filter((a) => a.staff_id === s.id && a.status !== "cancelled");
+    const memberCompleted = memberAppts.filter((a) => a.status === "completed");
+    const memberRevenue = memberCompleted.reduce(
+      (sum, a) => sum + Math.max(0, (a.total_price || 0) - (a.discount_amount || 0)),
+      0,
+    );
+    const rate = s.commission_rate ?? 40;
+    const commissionAmount = Math.round((memberRevenue * rate) / 100);
+    const salonShare = Math.max(0, memberRevenue - commissionAmount);
+    totalCommissions += commissionAmount;
+    return {
+      id: s.id,
+      name: s.name,
+      title: s.title || "",
+      color: s.color,
+      commission_rate: rate,
+      total_appointments: memberAppts.length,
+      completed_appointments: memberCompleted.length,
+      total_revenue: memberRevenue,
+      commission_amount: commissionAmount,
+      salon_share: salonShare,
+    };
+  });
+
+  const topServices = await query<{
+    id: number;
+    name: string;
+    category: string;
+    color: string;
+    booking_count: number;
+    revenue: number;
+  }>(
+    `SELECT sv.id, sv.name, sv.category, sv.color,
+            COUNT(aps.id) as booking_count,
+            COALESCE(SUM(aps.price), 0) as revenue
+     FROM services sv
+     LEFT JOIN appointment_services aps ON aps.service_id = sv.id
+     LEFT JOIN appointments a ON a.id = aps.appointment_id
+       AND a.status != 'cancelled'
+       ${start ? "AND a.scheduled_date >= ?" : ""}
+       ${end ? "AND a.scheduled_date <= ?" : ""}
+     GROUP BY sv.id
+     ORDER BY booking_count DESC, revenue DESC`,
+    dateParams,
+  );
+
+  const inv = await get<{ value: number; cost: number }>(
+    "SELECT COALESCE(SUM(stock * price), 0) as value, COALESCE(SUM(stock * cost), 0) as cost FROM products",
+  );
+
+  const paymentBreakdown = Array.from(methodMap.entries()).map(([method, data]) => ({
+    method,
+    count: data.count,
+    amount: data.amount,
+  }));
+
+  return c.json({
+    summary: {
+      total_appointments: totalAppointments,
+      completed_appointments: completedAppointments,
+      cancelled_appointments: cancelledAppointments,
+      gross_revenue: grossRevenue,
+      net_revenue: netRevenue,
+      total_discounts: totalDiscounts,
+      total_collected: totalCollected,
+      total_unpaid: totalUnpaid,
+      total_commissions: totalCommissions,
+      salon_net_profit: Math.max(0, netRevenue - totalCommissions),
+      inventory_value: inv?.value || 0,
+      inventory_cost: inv?.cost || 0,
+    },
+    staff_performance: staffPerformance,
+    top_services: topServices,
+    payment_breakdown: paymentBreakdown,
+  }, 200);
+});
+
+// ── Availability Slots (for Online Booking Portal) ────────────────
+
+const getAvailability = createRoute({
+  method: "get",
+  path: "/api/availability",
+  request: {
+    query: z.object({
+      date: z.string(),
+      staff_id: z.string().optional(),
+      duration: z.string().optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Available start times for booking",
+      content: { "application/json": { schema: z.object({
+        slots: z.array(z.object({
+          time: z.string(),
+          available: z.boolean(),
+        })),
+      }) } },
+    },
+  },
+});
+
+app.openapi(getAvailability, async (c) => {
+  const { date, staff_id, duration } = c.req.valid("query");
+  const dur = Math.max(15, parseInt(duration || "60", 10) || 60);
+  const staffId = staff_id ? parseInt(staff_id, 10) : null;
+  const busy = staffId ? await busyFor(staffId, date) : [];
+
+  const slots: { time: string; available: boolean }[] = [];
+  // Salon hours: 09:00 to 20:00 in 30-min steps
+  for (let mins = 9 * 60; mins + dur <= 20 * 60; mins += 30) {
+    const hh = String(Math.floor(mins / 60)).padStart(2, "0");
+    const mm = String(mins % 60).padStart(2, "0");
+    const startTime = `${hh}:${mm}`;
+    const endTime = addMinutes(startTime, dur);
+    const conflicts = staffId ? findConflicts(startTime, endTime, busy) : [];
+    slots.push({ time: startTime, available: conflicts.length === 0 });
+  }
+  return c.json({ slots }, 200);
+});
+
+// ── Demo Sample Appointments Seeder ───────────────────────────────
+
+const seedDemoAppointments = createRoute({
+  method: "post",
+  path: "/api/demo-appointments",
+  responses: {
+    201: { description: "Seeded demo appointments", content: { "application/json": { schema: z.object({ created: z.number().int() }) } } },
+  },
+});
+
+app.openapi(seedDemoAppointments, async (c) => {
+  const todayStr = new Date().toISOString().split("T")[0];
+  const tomorrowDate = new Date(Date.now() + 86400000).toISOString().split("T")[0];
+
+  const existingToday = await get<{ count: number }>(
+    "SELECT COUNT(*) as count FROM appointments WHERE scheduled_date = ?",
+    [todayStr],
+  );
+  if ((existingToday?.count ?? 0) > 0) {
+    return c.json({ created: 0 }, 201);
+  }
+
+  const samples = [
+    { client_id: 1, staff_id: 1, date: todayStr, start: "09:30", end: "10:30", status: "completed", price: 450000, discount: 0, deposit: 450000, payStatus: "paid", payMethod: "card", notes: "کوتاهی لایه‌ای و براشینگ", svcs: [{ id: 1, price: 450000, dur: 60 }] },
+    { client_id: 2, staff_id: 2, date: todayStr, start: "10:00", end: "11:30", status: "completed", price: 1800000, discount: 100000, deposit: 1700000, payStatus: "paid", payMethod: "transfer", notes: "لایت کاراملی پایه ۸", svcs: [{ id: 3, price: 1800000, dur: 90 }] },
+    { client_id: 3, staff_id: 3, date: todayStr, start: "11:00", end: "11:45", status: "in_progress", price: 550000, discount: 0, deposit: 200000, payStatus: "deposit", payMethod: "online", notes: "طراحی فرنچ سفید صدفی", svcs: [{ id: 2, price: 300000, dur: 30 }, { id: 4, price: 250000, dur: 15 }] },
+    { client_id: 4, staff_id: 4, date: todayStr, start: "14:00", end: "16:00", status: "confirmed", price: 2500000, discount: 0, deposit: 500000, payStatus: "deposit", payMethod: "card", notes: "میکاپ و شینیون مراسم شب", svcs: [{ id: 6, price: 2500000, dur: 120 }] },
+    { client_id: 1, staff_id: 1, date: tomorrowDate, start: "11:00", end: "11:30", status: "booked", price: 300000, discount: 0, deposit: 0, payStatus: "unpaid", payMethod: "", notes: "براشینگ مجلسی", svcs: [{ id: 2, price: 300000, dur: 30 }] },
+  ];
+
+  let createdCount = 0;
+  for (const s of samples) {
+    const identifier = await nextIdentifier();
+    const res = await run(
+      `INSERT INTO appointments (identifier, client_id, staff_id, status, scheduled_date, start_time, end_time, total_price, discount_amount, deposit_amount, payment_status, payment_method, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [identifier, s.client_id, s.staff_id, s.status, s.date, s.start, s.end, s.price, s.discount, s.deposit, s.payStatus, s.payMethod, s.notes],
+    );
+    const aptId = res.lastInsertRowid;
+    for (const sv of s.svcs) {
+      await run(
+        "INSERT INTO appointment_services (appointment_id, service_id, price, duration) VALUES (?, ?, ?, ?)",
+        [aptId, sv.id, sv.price, sv.dur],
+      );
+    }
+    createdCount++;
+  }
+
+  await run(
+    "INSERT INTO blocked_slots (staff_id, blocked_date, start_time, end_time, reason) VALUES (1, ?, '13:00', '14:00', 'استراحت و ناهار')",
+    [todayStr],
+  );
+  await run(
+    "INSERT INTO blocked_slots (staff_id, blocked_date, start_time, end_time, reason) VALUES (2, ?, '13:00', '14:00', 'استراحت و ناهار')",
+    [todayStr],
+  );
+
+  return c.json({ created: createdCount }, 201);
 });
 
 // ── Appointments ───────────────────────────────────────────────────
@@ -282,9 +594,9 @@ app.openapi(listAppointments, async (c) => {
   const params: unknown[] = [];
 
   if (q.search) {
-    where += " AND (a.identifier LIKE ? OR cl.name LIKE ?)";
+    where += " AND (a.identifier LIKE ? OR cl.name LIKE ? OR cl.phone LIKE ?)";
     const s = `%${q.search}%`;
-    params.push(s, s);
+    params.push(s, s, s);
   }
   if (q.status) { where += " AND a.status = ?"; params.push(q.status); }
   if (q.date) { where += " AND a.scheduled_date = ?"; params.push(q.date); }
@@ -341,7 +653,6 @@ app.openapi(getCalendar, async (c) => {
     [start, end],
   );
 
-  // Attach services to each appointment
   for (const apt of appointments) {
     const svcs = await query<Record<string, unknown>>(
       `SELECT aps.*, sv.name as service_name FROM appointment_services aps
@@ -417,12 +728,16 @@ const createAppointment = createRoute({
       staff_id: z.number().int().nullable().optional(),
       scheduled_date: z.string(),
       start_time: z.string().optional(),
+      discount_amount: z.number().min(0).optional(),
+      deposit_amount: z.number().min(0).optional(),
+      payment_status: z.string().optional(),
+      payment_method: z.string().optional(),
       notes: z.string().optional(),
       is_recurring: z.number().int().optional(),
       recurrence_interval: z.string().optional(),
       service_ids: z.array(z.number().int()).optional(),
       allow_conflict: z.boolean().optional().openapi({
-        description: "Book even though the staff member is already busy then. Salons do deliberately overlap (a colour processes while the next client is cut), so this is allowed, but never by accident.",
+        description: "Book even though the staff member is already busy then.",
       }),
     }) } } },
   },
@@ -438,7 +753,6 @@ app.openapi(createAppointment, async (c) => {
   const identifier = await nextIdentifier();
   const startTime = body.start_time ?? "09:00";
 
-  // Calculate total duration and price from services
   let totalDuration = 60;
   let totalPrice = 0;
   const serviceIds = body.service_ids || [];
@@ -460,7 +774,6 @@ app.openapi(createAppointment, async (c) => {
   }
   const endTime = addMinutes(startTime, totalDuration);
 
-  // Nothing to contend for when the booking is unassigned.
   if (body.staff_id && !body.allow_conflict) {
     const conflicts = findConflicts(startTime, endTime, await busyFor(body.staff_id, body.scheduled_date));
     if (conflicts.length > 0) {
@@ -468,17 +781,23 @@ app.openapi(createAppointment, async (c) => {
     }
   }
 
+  const discountAmount = body.discount_amount ?? 0;
+  const depositAmount = body.deposit_amount ?? 0;
+  const paymentStatus = body.payment_status || (depositAmount > 0 ? "deposit" : "unpaid");
+  const paymentMethod = body.payment_method || "";
+
   const result = await run(
-    `INSERT INTO appointments (identifier, client_id, staff_id, scheduled_date, start_time, end_time, total_price, notes, is_recurring, recurrence_interval)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [identifier, body.client_id, body.staff_id ?? null, body.scheduled_date,
-    startTime, endTime, totalPrice,
-    body.notes || "", body.is_recurring || 0, body.recurrence_interval || ""],
+    `INSERT INTO appointments (identifier, client_id, staff_id, scheduled_date, start_time, end_time, total_price, discount_amount, deposit_amount, payment_status, payment_method, notes, is_recurring, recurrence_interval)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      identifier, body.client_id, body.staff_id ?? null, body.scheduled_date,
+      startTime, endTime, totalPrice, discountAmount, depositAmount, paymentStatus, paymentMethod,
+      body.notes || "", body.is_recurring || 0, body.recurrence_interval || "",
+    ],
   );
 
   const aptId = result.lastInsertRowid;
 
-  // Insert appointment services
   for (const svcId of serviceIds) {
     const svc = await get<{ duration: number; price: number }>("SELECT duration, price FROM services WHERE id = ?", [svcId]);
     if (svc) {
@@ -516,6 +835,10 @@ const updateAppointment = createRoute({
       start_time: z.string().optional(),
       end_time: z.string().optional(),
       total_price: z.number().optional(),
+      discount_amount: z.number().min(0).optional(),
+      deposit_amount: z.number().min(0).optional(),
+      payment_status: z.string().optional(),
+      payment_method: z.string().optional(),
       notes: z.string().optional(),
       allow_conflict: z.boolean().optional().openapi({
         description: "Move the appointment even though the staff member is already busy then.",
@@ -539,13 +862,10 @@ app.openapi(updateAppointment, async (c) => {
   }>("SELECT staff_id, scheduled_date, start_time, end_time, status FROM appointments WHERE id = ?", [id]);
   if (!existing) return c.json({ error: "Not found" }, 404);
 
-  // Where the appointment lands once this patch is applied.
   const staffId = body.staff_id !== undefined ? body.staff_id : existing.staff_id;
   const date = body.scheduled_date ?? existing.scheduled_date;
   const startTime = body.start_time ?? existing.start_time;
 
-  // Moving an appointment keeps its length. Without this, patching start_time
-  // alone left the old end_time behind and silently resized the booking.
   let endTime = body.end_time ?? existing.end_time;
   if (body.start_time !== undefined && body.start_time !== existing.start_time && body.end_time === undefined) {
     const was = toMinutes(existing.start_time);
@@ -560,8 +880,6 @@ app.openapi(updateAppointment, async (c) => {
   const status = body.status ?? existing.status;
   const restored = existing.status === "cancelled" && status !== "cancelled";
 
-  // An existing deliberate overlap must not block notes, check-in, completion,
-  // or cancellation. Restoring a cancelled booking occupies its slot again.
   if (moved || restored) {
     const start = toMinutes(startTime);
     const end = toMinutes(endTime);
@@ -681,13 +999,13 @@ const getAllClients = createRoute({
   responses: {
     200: {
       description: "All clients for lookup",
-      content: { "application/json": { schema: z.object({ clients: z.array(z.object({ id: z.number().int(), name: z.string() })) }) } },
+      content: { "application/json": { schema: z.object({ clients: z.array(z.object({ id: z.number().int(), name: z.string(), phone: z.string().optional() })) }) } },
     },
   },
 });
 
 app.openapi(getAllClients, async (c) => {
-  const clients = await query<{ id: number; name: string }>("SELECT id, name FROM clients ORDER BY name ASC");
+  const clients = await query<{ id: number; name: string; phone: string }>("SELECT id, name, phone FROM clients ORDER BY name ASC");
   return c.json({ clients }, 200);
 });
 
@@ -824,13 +1142,13 @@ const getAllStaff = createRoute({
   responses: {
     200: {
       description: "All staff for lookup",
-      content: { "application/json": { schema: z.object({ staff: z.array(z.object({ id: z.number().int(), name: z.string(), color: z.string() })) }) } },
+      content: { "application/json": { schema: z.object({ staff: z.array(z.object({ id: z.number().int(), name: z.string(), color: z.string(), title: z.string().optional() })) }) } },
     },
   },
 });
 
 app.openapi(getAllStaff, async (c) => {
-  const staff = await query<{ id: number; name: string; color: string }>("SELECT id, name, color FROM staff WHERE active = 1 ORDER BY name ASC");
+  const staff = await query<{ id: number; name: string; color: string; title: string }>("SELECT id, name, color, title FROM staff WHERE active = 1 ORDER BY name ASC");
   return c.json({ staff }, 200);
 });
 
@@ -844,6 +1162,7 @@ const createStaff = createRoute({
       phone: z.string().optional(),
       title: z.string().optional(),
       color: z.string().optional(),
+      commission_rate: z.number().min(0).max(100).optional(),
     }) } } },
   },
   responses: { 201: { description: "Created", content: { "application/json": { schema: z.object({ staff: StaffSchema }) } } } },
@@ -852,8 +1171,8 @@ const createStaff = createRoute({
 app.openapi(createStaff, async (c) => {
   const body = c.req.valid("json");
   const result = await run(
-    "INSERT INTO staff (name, email, phone, title, color) VALUES (?, ?, ?, ?, ?)",
-    [body.name, body.email || "", body.phone || "", body.title || "", body.color || "#7c3aed"],
+    "INSERT INTO staff (name, email, phone, title, color, commission_rate) VALUES (?, ?, ?, ?, ?, ?)",
+    [body.name, body.email || "", body.phone || "", body.title || "", body.color || "#7c3aed", body.commission_rate ?? 40],
   );
   const staff = await get<Record<string, unknown>>("SELECT * FROM staff WHERE id = ?", [result.lastInsertRowid]);
   return c.json({ staff }, 201);
@@ -870,6 +1189,7 @@ const updateStaff = createRoute({
       phone: z.string().optional(),
       title: z.string().optional(),
       color: z.string().optional(),
+      commission_rate: z.number().min(0).max(100).optional(),
       active: z.number().int().optional(),
     }) } } },
   },
