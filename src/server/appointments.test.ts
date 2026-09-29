@@ -191,11 +191,46 @@ test("client history summarizes services and the latest service note", async (t)
   const history = await call("GET", "/api/clients/1");
   assert.equal(history.status, 200);
   const visit = history.body.appointments.find((appointment: { id: number }) => appointment.id === id);
-  assert.equal(visit.service_names, "Standard Session, Quick Service");
+  assert.equal(visit.service_names, "کوتاهی و استایل مو, براشینگ و سشوار مجلسی");
   assert.equal(visit.latest_note, "Latest formula");
   const blankVisit = history.body.appointments.find((appointment: { id: number }) => appointment.id === blank.body.appointment.id);
   assert.equal(blankVisit.service_names, null);
   assert.equal(blankVisit.latest_note, null);
+});
+
+test("financial reports calculate commissions, discounts, deposits, and availability slots", async (t) => {
+  const { create, update, call } = await setup(t);
+  const created = await create({
+    service_ids: [1],
+    discount_amount: 50000,
+    deposit_amount: 150000,
+    payment_status: "deposit",
+    payment_method: "card",
+  });
+  assert.equal(created.status, 201);
+  const id = created.body.appointment.id;
+  assert.equal(created.body.appointment.discount_amount, 50000);
+  assert.equal(created.body.appointment.deposit_amount, 150000);
+  assert.equal(created.body.appointment.payment_status, "deposit");
+
+  await update(id, { status: "completed", payment_status: "paid" });
+  const reports = await call("GET", "/api/reports?start=2026-09-14&end=2026-09-14");
+  assert.equal(reports.status, 200);
+  assert.equal(reports.body.summary.completed_appointments, 1);
+  assert.equal(reports.body.summary.gross_revenue, 450000);
+  assert.equal(reports.body.summary.net_revenue, 400000);
+  assert.equal(reports.body.summary.total_discounts, 50000);
+  assert.equal(reports.body.summary.total_collected, 400000);
+  // Staff 1 has 50% commission -> 200000 commission
+  assert.equal(reports.body.summary.total_commissions, 200000);
+  assert.equal(reports.body.summary.salon_net_profit, 200000);
+
+  const avail = await call("GET", "/api/availability?date=2026-09-14&staff_id=1&duration=60");
+  assert.equal(avail.status, 200);
+  const slot10 = avail.body.slots.find((s: { time: string }) => s.time === "10:00");
+  const slot11 = avail.body.slots.find((s: { time: string }) => s.time === "11:00");
+  assert.equal(slot10.available, false);
+  assert.equal(slot11.available, true);
 });
 
 test("products preserve zero thresholds and can be edited without recreation", async (t) => {

@@ -6,27 +6,23 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { JalaliDatePicker } from "@/components/ui/jalali-date-picker";
 import { CreateAppointment } from "./create-appointment";
 import { cn } from "@/lib/utils";
 import { packLanes } from "@/lib/overlap";
-import { parseDate, shiftDate, today } from "@/lib/dates";
+import { shiftDate, today } from "@/lib/dates";
 import { calendarSlotMinutes, formatCalendarTime } from "@/lib/calendar-slot";
 import { conflictsFrom, describeConflict, type Conflict } from "@/lib/conflicts";
 import { downloadDaySheet } from "@/lib/day-sheet";
+import { formatCurrency, formatTimeFa, toPersianDigits } from "@/lib/format";
 
-const HOURS = Array.from({ length: 14 }, (_, i) => i + 7); // 7 AM to 8 PM
+const HOURS = Array.from({ length: 14 }, (_, i) => i + 7); // 07:00 to 20:00
 
 function timeToMinutes(time: string): number {
   const [h, m] = time.split(":").map(Number);
   return h * 60 + m;
 }
 
-/**
- * Lay a column's appointments and blocked slots out side by side.
- *
- * Blocked time is packed together with the bookings because it competes for the
- * same person: drawing a booking over the top of a lunch break hid the break.
- */
 function layOutColumn(
   appointments: Appointment[],
   blocked: BlockedSlot[],
@@ -46,17 +42,13 @@ function layOutColumn(
   ]);
 }
 
-/** Where a laid-out span sits across the width of its column. */
 function laneStyle(lane: number, lanes: number) {
   const width = 100 / lanes;
-  return { left: `calc(${lane * width}% + 4px)`, width: `calc(${width}% - 8px)` };
+  return { right: `calc(${lane * width}% + 4px)`, width: `calc(${width}% - 8px)` };
 }
 
 function formatHour(h: number): string {
-  if (h === 0) return "12 AM";
-  if (h < 12) return `${h} AM`;
-  if (h === 12) return "12 PM";
-  return `${h - 12} PM`;
+  return `${toPersianDigits(String(h).padStart(2, "0"))}:۰۰`;
 }
 
 export function CalendarView() {
@@ -68,12 +60,11 @@ export function CalendarView() {
   const [draftBooking, setDraftBooking] = useState<{ staffId: number | null; startTime: string } | null>(null);
   const [showBlockForm, setShowBlockForm] = useState(false);
   const [blockStaff, setBlockStaff] = useState("");
-  const [blockStart, setBlockStart] = useState("12:00");
-  const [blockEnd, setBlockEnd] = useState("13:00");
+  const [blockStart, setBlockStart] = useState("13:00");
+  const [blockEnd, setBlockEnd] = useState("14:00");
   const [blockReason, setBlockReason] = useState("");
   const [blockConflicts, setBlockConflicts] = useState<Conflict[] | null>(null);
 
-  const dateObj = parseDate(calendarDate);
   const todayStr = today();
 
   const chooseDate = (date: string) => {
@@ -133,29 +124,29 @@ export function CalendarView() {
     <div className="flex h-full min-w-0 flex-col gap-4 p-4 sm:p-6">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
         <div className="flex w-full items-center justify-between gap-3 sm:w-auto">
-          <h1 className="text-2xl font-bold tracking-tight">Calendar</h1>
-          <Button variant="outline" size="sm" className="h-11" onClick={() => chooseDate(todayStr)}>Today</Button>
+          <h1 className="text-2xl font-bold tracking-tight">تقویم کاری سالن</h1>
+          <Button variant="outline" size="sm" className="h-10" onClick={() => chooseDate(todayStr)}>امروز</Button>
         </div>
         <div className="flex w-full min-w-0 items-center gap-2 sm:w-auto">
-          <Button variant="outline" size="icon" className="h-11 w-11 shrink-0" aria-label="Previous day" onClick={() => shiftDay(-1)}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <span className="min-w-0 flex-1 text-center text-sm font-semibold sm:min-w-[200px]" aria-live="polite" aria-atomic="true">
-            {dateObj.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", year: "numeric" })}
-          </span>
-          <Button variant="outline" size="icon" className="h-11 w-11 shrink-0" aria-label="Next day" onClick={() => shiftDay(1)}>
+          <Button variant="outline" size="icon" className="h-10 w-10 shrink-0" aria-label="روز قبل" onClick={() => shiftDay(-1)}>
             <ChevronRight className="h-4 w-4" />
+          </Button>
+          <div className="min-w-[220px] flex-1">
+            <JalaliDatePicker value={calendarDate} onChange={chooseDate} />
+          </div>
+          <Button variant="outline" size="icon" className="h-10 w-10 shrink-0" aria-label="روز بعد" onClick={() => shiftDay(1)}>
+            <ChevronLeft className="h-4 w-4" />
           </Button>
         </div>
         <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto">
-          <Button variant="outline" size="sm" className="h-11 w-full sm:w-auto" aria-expanded={showBlockForm} aria-controls="calendar-block-time" onClick={() => { setShowBlockForm(!showBlockForm); setBlockConflicts(null); }}>
-            <Ban className="h-3.5 w-3.5" /> Block Time
+          <Button variant="outline" size="sm" className="h-10 w-full gap-1.5 sm:w-auto" aria-expanded={showBlockForm} aria-controls="calendar-block-time" onClick={() => { setShowBlockForm(!showBlockForm); setBlockConflicts(null); }}>
+            <Ban className="h-3.5 w-3.5" /> مسدود کردن ساعت
           </Button>
-          <Button variant="outline" size="sm" className="h-11 w-full sm:w-auto" onClick={() => downloadDaySheet(calendarDate, calendarAppointments, calendarBlocked)}>
-            <Download className="h-3.5 w-3.5" /> Day Sheet
+          <Button variant="outline" size="sm" className="h-10 w-full gap-1.5 sm:w-auto" onClick={() => downloadDaySheet(calendarDate, calendarAppointments, calendarBlocked)}>
+            <Download className="h-3.5 w-3.5" /> خروجی برنامه روز (CSV)
           </Button>
-          <Button size="sm" className="col-span-2 h-11 w-full sm:w-auto" onClick={openBlankBooking}>
-            <Plus className="h-3.5 w-3.5" /> New Booking
+          <Button size="sm" className="col-span-2 h-10 w-full gap-1.5 sm:w-auto" onClick={openBlankBooking}>
+            <Plus className="h-3.5 w-3.5" /> ثبت نوبت جدید
           </Button>
         </div>
       </div>
@@ -164,38 +155,38 @@ export function CalendarView() {
         <Card id="calendar-block-time" className="shrink-0">
           <CardContent className="grid grid-cols-2 items-end gap-3 p-4 sm:grid-cols-4 xl:flex xl:flex-wrap">
             <div className="col-span-2 min-w-0 space-y-1 xl:w-48">
-              <Label htmlFor="block-staff" className="text-xs">Staff</Label>
-              <select id="block-staff" className="h-11 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm" value={blockStaff} onChange={(e) => { setBlockStaff((e.target as HTMLSelectElement).value); clearBlockConflicts(); }}>
-                <option value="">Select staff...</option>
+              <Label htmlFor="block-staff" className="text-xs">پرسنل / متخصص</Label>
+              <select id="block-staff" className="h-10 w-full min-w-0 rounded-md border border-input bg-background px-3 text-sm" value={blockStaff} onChange={(e) => { setBlockStaff((e.target as HTMLSelectElement).value); clearBlockConflicts(); }}>
+                <option value="">انتخاب پرسنل...</option>
                 {staffLookup.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             </div>
             <div className="min-w-0 space-y-1 xl:w-28">
-              <Label htmlFor="block-start" className="text-xs">Start</Label>
-              <Input id="block-start" type="time" className="h-11 w-full min-w-0" value={blockStart} onChange={(e) => { setBlockStart((e.target as HTMLInputElement).value); clearBlockConflicts(); }} />
+              <Label htmlFor="block-start" className="text-xs">ساعت شروع</Label>
+              <Input id="block-start" type="time" className="h-10 w-full min-w-0" value={blockStart} onChange={(e) => { setBlockStart((e.target as HTMLInputElement).value); clearBlockConflicts(); }} />
             </div>
             <div className="min-w-0 space-y-1 xl:w-28">
-              <Label htmlFor="block-end" className="text-xs">End</Label>
-              <Input id="block-end" type="time" className="h-11 w-full min-w-0" value={blockEnd} onChange={(e) => { setBlockEnd((e.target as HTMLInputElement).value); clearBlockConflicts(); }} />
+              <Label htmlFor="block-end" className="text-xs">ساعت پایان</Label>
+              <Input id="block-end" type="time" className="h-10 w-full min-w-0" value={blockEnd} onChange={(e) => { setBlockEnd((e.target as HTMLInputElement).value); clearBlockConflicts(); }} />
             </div>
             <div className="col-span-2 min-w-0 space-y-1 xl:flex-1">
-              <Label htmlFor="block-reason" className="text-xs">Reason</Label>
-              <Input id="block-reason" className="h-11" placeholder="e.g. Lunch break" value={blockReason} onChange={(e) => setBlockReason((e.target as HTMLInputElement).value)} />
+              <Label htmlFor="block-reason" className="text-xs">علت (ناهار، مرخصی، استراحت...)</Label>
+              <Input id="block-reason" className="h-10" placeholder="مثلاً استراحت و ناهار" value={blockReason} onChange={(e) => setBlockReason((e.target as HTMLInputElement).value)} />
             </div>
             {blockConflicts && (
               <div role="alert" className="col-span-2 flex min-w-0 gap-2.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm sm:col-span-4 xl:basis-full">
                 <TriangleAlert className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-600" aria-hidden="true" />
                 <div className="min-w-0 space-y-1">
-                  <p className="font-medium">{staffLookup.find((s) => String(s.id) === blockStaff)?.name ?? "That staff member"} is not free then.</p>
+                  <p className="font-medium">{staffLookup.find((s) => String(s.id) === blockStaff)?.name ?? "این پرسنل"} در این بازه زمانی برنامه دیگری دارد:</p>
                   <ul className="text-muted-foreground">
                     {blockConflicts.map((conflict, index) => <li key={index}>{describeConflict(conflict)}</li>)}
                   </ul>
-                  <p className="text-muted-foreground">Choose another time or staff member, or block it anyway.</p>
+                  <p className="text-muted-foreground">ساعت دیگری انتخاب کنید یا با تایید هم‌پوشانی، ساعت را مسدود کنید.</p>
                 </div>
               </div>
             )}
-            {blockConflicts && <Button type="button" variant="outline" size="sm" className="col-span-2 h-11 sm:col-span-1" onClick={() => handleAddBlock(true)}>Block anyway</Button>}
-            <Button size="sm" className="col-span-2 h-11 sm:col-span-1" onClick={() => handleAddBlock()}>Add Block</Button>
+            {blockConflicts && <Button type="button" variant="outline" size="sm" className="col-span-2 h-10 sm:col-span-1" onClick={() => handleAddBlock(true)}>مسدودسازی با وجود تداخل</Button>}
+            <Button size="sm" className="col-span-2 h-10 sm:col-span-1" onClick={() => handleAddBlock()}>ثبت ساعت مسدود</Button>
           </CardContent>
         </Card>
       )}
@@ -209,11 +200,11 @@ export function CalendarView() {
         />
       )}
 
-      <div className="flex min-h-80 min-w-0 flex-1 overflow-auto rounded-lg border bg-card" role="region" aria-label="Daily staff schedule" tabIndex={0}>
-        {/* Time gutter */}
-        <div className="w-16 flex-shrink-0 border-r bg-muted/30 pt-10">
+      <div className="flex min-h-80 min-w-0 flex-1 overflow-auto rounded-lg border bg-card" role="region" aria-label="برنامه روزانه پرسنل" tabIndex={0}>
+        {/* Time gutter (right side in RTL) */}
+        <div className="w-16 flex-shrink-0 border-l bg-muted/30 pt-10">
           {HOURS.map((h) => (
-            <div key={h} className="flex h-16 items-start justify-end pr-2 text-xs text-muted-foreground" style={{ height: hourHeight }}>
+            <div key={h} className="flex h-16 items-start justify-center px-1 text-xs font-medium text-muted-foreground" style={{ height: hourHeight }}>
               {formatHour(h)}
             </div>
           ))}
@@ -225,15 +216,15 @@ export function CalendarView() {
             const memberAppts = calendarAppointments.filter((a) => a.staff_id === member.id);
             const memberBlocked = calendarBlocked.filter((b) => b.staff_id === member.id);
             return (
-              <div key={member.id} className="flex min-w-[180px] flex-1 flex-col border-r last:border-r-0">
+              <div key={member.id} className="flex min-w-[190px] flex-1 flex-col border-l last:border-l-0">
                 <div className="flex items-center justify-center gap-2 border-b bg-muted/20 px-3 py-2.5">
                   <span className="inline-block h-3 w-3 rounded-full" style={{ backgroundColor: member.color }} />
-                  <span className="text-sm font-medium">{member.name}</span>
+                  <span className="text-sm font-semibold">{member.name}</span>
                 </div>
                 <div
                   className="relative shrink-0 cursor-crosshair"
                   style={{ height: totalHeight }}
-                  aria-label={`${member.name}'s schedule; click empty time to create a booking`}
+                  aria-label={`برنامه ${member.name}؛ برای ثبت نوبت روی فضای خالی کلیک کنید`}
                   onClick={(event) => {
                     if ((event.target as HTMLElement).closest("[data-calendar-item]")) return;
                     openSlotBooking(member.id, event.currentTarget, event.clientY);
@@ -259,12 +250,13 @@ export function CalendarView() {
                         <div
                           key={item.key}
                           data-calendar-item
-                          className="absolute z-10 flex items-center justify-between rounded bg-muted/60 px-2 text-xs text-muted-foreground"
-                          style={{ ...lane, top, height: Math.max(height, 20) }}
+                          className="absolute z-10 flex items-center justify-between rounded bg-muted/80 px-2 text-xs text-muted-foreground border border-border"
+                          style={{ ...lane, top, height: Math.max(height, 22) }}
                         >
-                          <span className="truncate">{block.reason || "Blocked"}</span>
+                          <span className="truncate">{block.reason || "ساعت مسدود"}</span>
                           <button
                             className="flex-shrink-0 rounded p-0.5 hover:bg-muted"
+                            title="حذف ساعت مسدود"
                             onClick={(e) => { e.stopPropagation(); deleteBlockedSlot(block.id); }}
                           >
                             <X className="h-3 w-3" />
@@ -274,28 +266,31 @@ export function CalendarView() {
                     }
 
                     const apt = item.appointment!;
-                    const services = apt.appointment_services?.map((s) => s.service_name).filter(Boolean).join(", ");
+                    const services = apt.appointment_services?.map((s) => s.service_name).filter(Boolean).join("، ");
+                    const netPrice = Math.max(0, (apt.total_price || 0) - (apt.discount_amount || 0));
                     return (
                       <button
                         key={item.key}
                         data-calendar-item
                         className={cn(
-                          "absolute z-20 cursor-pointer overflow-hidden rounded-md border-l-[3px] px-2 py-1 text-left transition-shadow hover:shadow-md",
+                          "absolute z-20 cursor-pointer overflow-hidden rounded-md border-r-[4px] px-2 py-1 text-right transition-shadow hover:shadow-md",
                         )}
                         style={{
                           ...lane,
                           top,
-                          height: Math.max(height, 28),
-                          backgroundColor: `${member.color}14`,
-                          borderLeftColor: member.color,
+                          height: Math.max(height, 30),
+                          backgroundColor: `${member.color}18`,
+                          borderRightColor: member.color,
                         }}
                         onClick={() => navigate(`/appointments/${apt.id}`)}
-                        title={`${apt.start_time} - ${apt.end_time} ${apt.client_name ?? ""}`}
+                        title={`${formatTimeFa(apt.start_time)} تا ${formatTimeFa(apt.end_time)} - ${apt.client_name ?? ""}`}
                       >
-                        <div className="text-[10px] font-medium text-muted-foreground">{apt.start_time} - {apt.end_time}</div>
-                        <div className="truncate text-xs font-semibold">{apt.client_name}</div>
+                        <div className="text-[10px] font-medium text-muted-foreground">
+                          {formatTimeFa(apt.start_time)} - {formatTimeFa(apt.end_time)}
+                        </div>
+                        <div className="truncate text-xs font-bold">{apt.client_name}</div>
                         {services && height > 50 && <div className="truncate text-[10px] text-muted-foreground">{services}</div>}
-                        {height > 40 && <div className="text-[10px] font-medium">${apt.total_price.toFixed(2)}</div>}
+                        {height > 40 && <div className="text-[10px] font-semibold text-primary">{formatCurrency(netPrice)}</div>}
                       </button>
                     );
                   })}
@@ -309,15 +304,15 @@ export function CalendarView() {
             const unassigned = calendarAppointments.filter((a) => !a.staff_id);
             if (unassigned.length === 0) return null;
             return (
-              <div className="flex min-w-[180px] flex-1 flex-col border-r last:border-r-0">
+              <div className="flex min-w-[190px] flex-1 flex-col border-l last:border-l-0">
                 <div className="flex items-center justify-center gap-2 border-b bg-muted/20 px-3 py-2.5">
                   <span className="inline-block h-3 w-3 rounded-full bg-muted-foreground/40" />
-                  <span className="text-sm font-medium text-muted-foreground">Unassigned</span>
+                  <span className="text-sm font-medium text-muted-foreground">بدون پرسنل مشخص</span>
                 </div>
                 <div
                   className="relative shrink-0 cursor-crosshair"
                   style={{ height: totalHeight }}
-                  aria-label="Unassigned schedule; click empty time to create a booking"
+                  aria-label="نوبت‌های بدون پرسنل"
                   onClick={(event) => {
                     if ((event.target as HTMLElement).closest("[data-calendar-item]")) return;
                     openSlotBooking(null, event.currentTarget, event.clientY);
@@ -330,17 +325,20 @@ export function CalendarView() {
                     const apt = item.appointment!;
                     const top = (item.start / totalMinutes) * totalHeight;
                     const height = ((item.end - item.start) / totalMinutes) * totalHeight;
+                    const netPrice = Math.max(0, (apt.total_price || 0) - (apt.discount_amount || 0));
                     return (
                       <button
                         key={item.key}
                         data-calendar-item
-                        className="absolute z-20 cursor-pointer overflow-hidden rounded-md border-l-[3px] border-l-muted-foreground/40 bg-muted/30 px-2 py-1 text-left transition-shadow hover:shadow-md"
-                        style={{ ...laneStyle(item.lane, item.lanes), top, height: Math.max(height, 28) }}
+                        className="absolute z-20 cursor-pointer overflow-hidden rounded-md border-r-[4px] border-r-muted-foreground/40 bg-muted/30 px-2 py-1 text-right transition-shadow hover:shadow-md"
+                        style={{ ...laneStyle(item.lane, item.lanes), top, height: Math.max(height, 30) }}
                         onClick={() => navigate(`/appointments/${apt.id}`)}
                       >
-                        <div className="text-[10px] font-medium text-muted-foreground">{apt.start_time} - {apt.end_time}</div>
-                        <div className="truncate text-xs font-semibold">{apt.client_name}</div>
-                        <div className="text-[10px] font-medium">${apt.total_price.toFixed(2)}</div>
+                        <div className="text-[10px] font-medium text-muted-foreground">
+                          {formatTimeFa(apt.start_time)} - {formatTimeFa(apt.end_time)}
+                        </div>
+                        <div className="truncate text-xs font-bold">{apt.client_name}</div>
+                        <div className="text-[10px] font-semibold">{formatCurrency(netPrice)}</div>
                       </button>
                     );
                   })}

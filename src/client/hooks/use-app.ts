@@ -148,21 +148,24 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
 
   const addAppointment = useCallback(async (data: {
     client_id: number; staff_id?: number | null; scheduled_date: string;
-    start_time?: string; notes?: string; is_recurring?: number; recurrence_interval?: string; service_ids?: number[];
+    start_time?: string; discount_amount?: number; deposit_amount?: number;
+    payment_status?: string; payment_method?: string;
+    notes?: string; is_recurring?: number; recurrence_interval?: string; service_ids?: number[];
     allow_conflict?: boolean;
   }) => {
-    await api("POST", "/api/appointments", data);
+    const res = await api<{ appointment: Appointment }>("POST", "/api/appointments", data);
     await fetchAppointments(appointmentsPag, appointmentsSearch, appointmentsStatusFilter);
     await Promise.all([
       fetchStats(),
       fetchCalendar(calendarDate),
       ...(selectedClient?.id === data.client_id
-        ? [api<{ client: Client; appointments: Appointment[] }>("GET", `/api/clients/${data.client_id}`).then((res) => {
-            setSelectedClient(res.client);
-            setSelectedClientAppointments(res.appointments);
+        ? [api<{ client: Client; appointments: Appointment[] }>("GET", `/api/clients/${data.client_id}`).then((r) => {
+            setSelectedClient(r.client);
+            setSelectedClientAppointments(r.appointments);
           })]
         : []),
     ]);
+    return res.appointment;
   }, [appointmentsPag, appointmentsSearch, appointmentsStatusFilter, selectedClient, calendarDate, fetchAppointments, fetchStats, fetchCalendar]);
 
   const updateAppointment = useCallback(async (id: number, data: Partial<Appointment> & { allow_conflict?: boolean }) => {
@@ -181,6 +184,16 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     await fetchAppointments(appointmentsPag, appointmentsSearch, appointmentsStatusFilter);
     await Promise.all([fetchStats(), fetchCalendar(calendarDate)]);
   }, [appointmentsPag, appointmentsSearch, appointmentsStatusFilter, selectedAppointment, calendarDate, navigate, fetchAppointments, fetchStats, fetchCalendar]);
+
+  const seedDemoAppointments = useCallback(async () => {
+    const res = await api<{ created: number }>("POST", "/api/demo-appointments");
+    await Promise.all([
+      fetchStats(),
+      fetchAppointments(appointmentsPag, appointmentsSearch, appointmentsStatusFilter),
+      fetchCalendar(calendarDate),
+    ]);
+    return res.created;
+  }, [appointmentsPag, appointmentsSearch, appointmentsStatusFilter, calendarDate, fetchStats, fetchAppointments, fetchCalendar]);
 
   const selectAppointment = useCallback(async (id: number | null) => {
     if (id === null) { setSelectedAppointment(null); return; }
@@ -219,9 +232,10 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
   const setClientsPage = useCallback((page: number) => setClientsPag((p) => ({ ...p, page })), []);
 
   const addClient = useCallback(async (data: Partial<Client>) => {
-    await api("POST", "/api/clients", data);
+    const res = await api<{ client: Client }>("POST", "/api/clients", data);
     await fetchClients(clientsPag, clientsSearch);
     await Promise.all([fetchStats(), fetchLookups()]);
+    return res.client;
   }, [clientsPag, clientsSearch, fetchClients, fetchStats, fetchLookups]);
 
   const updateClient = useCallback(async (id: number, data: Partial<Client>) => {
@@ -317,7 +331,7 @@ export function useAppState(isAgent: boolean, navigate: (to: string) => void): A
     navigate, isAgent, stats,
     appointments, appointmentsPag, setAppointmentsPage, appointmentsSearch, setAppointmentsSearch,
     appointmentsStatusFilter, setAppointmentsStatusFilter,
-    addAppointment, updateAppointment, deleteAppointment,
+    addAppointment, updateAppointment, deleteAppointment, seedDemoAppointments,
     selectedAppointment, selectAppointment, addAppointmentNote, deleteAppointmentNote,
     calendarAppointments, calendarBlocked, calendarDate, setCalendarDate,
     addBlockedSlot, deleteBlockedSlot,
